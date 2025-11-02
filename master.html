@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マスターデータ管理</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 最小限のスタイル */
+        .family-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            background-color: #ffffff;
+        }
+        .family-header {
+            padding: 0.75rem 1rem;
+            background-color: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .member-list {
+            padding: 1rem;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.75rem;
+        }
+        .member-item {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.5rem;
+            align-items: center;
+        }
+        @media (min-width: 640px) {
+            .member-item {
+                grid-template-columns: repeat(6, minmax(0, 1fr));
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans p-4 md:p-8">
+
+    <div class="container mx-auto max-w-6xl">
+        <div class="flex justify-between items-center mb-6 border-b pb-2">
+            <h1 class="text-3xl font-bold text-gray-800">マスターデータ管理</h1>
+            <a href="./index.html" class="text-sm bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded-lg shadow transition duration-200">
+                &larr; 配車調整アプリに戻る
+            </a>
+        </div>
+
+        <!-- メッセージエリア -->
+        <div id="message" class="hidden p-4 mb-4 border rounded-lg" role="alert">
+            <span id="message-text"></span>
+            <button id="message-close" type="button" class="float-right font-bold text-lg leading-none">&times;</button>
+        </div>
+        
+        <!-- JSONインポート/エクスポート -->
+        <section class="mb-6 p-4 bg-white rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-3">JSONファイル操作</h2>
+            <div class="grid grid-cols-2 gap-2 max-w-md">
+                <button id="export-master-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200">
+                    マスターを保存 (JSON)
+                </button>
+                <label for="import-master-input" class="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200 cursor-pointer text-center">
+                    マスターを読み込む (JSON)
+                </label>
+                <input type="file" id="import-master-input" accept=".json" class="hidden">
+            </div>
+            <p class="text-xs text-gray-500 mt-2">※JSONファイルから読み込むと、現在のDBの内容は上書きされます。</p>
+        </section>
+
+        <!-- 家族と参加者データ -->
+        <section class="mb-6">
+            <h2 class="text-xl font-semibold text-gray-700 mb-3">家族・参加者データ</h2>
+            <div id="families-container">
+                <!-- JSで描画 -->
+                <p id="families-loading" class="text-gray-500">データを読み込み中...</p>
+            </div>
+            <div class="mt-4">
+                <input type="text" id="new-family-name" placeholder="新しい家族名" class="p-2 border rounded-md shadow-sm">
+                <button id="add-family-button" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200 ml-2">
+                    家族を追加
+                </button>
+            </div>
+        </section>
+
+        <!-- 車データ -->
+        <section class="mb-6">
+            <h2 class="text-xl font-semibold text-gray-700 mb-3">車データ</h2>
+            <div id="cars-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- JSで描画 -->
+                <p id="cars-loading" class="text-gray-500">データを読み込み中...</p>
+            </div>
+            <div class="mt-4 p-4 bg-white rounded-lg shadow">
+                <h3 class="text-lg font-medium mb-2">新しい車を追加</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <input type="text" id="new-car-id" placeholder="ID (例: c99)" class="p-2 border rounded-md shadow-sm">
+                    <input type="text" id="new-car-name" placeholder="車の名前 (例: 鈴木カー)" class="p-2 border rounded-md shadow-sm">
+                    <input type="text" id="new-car-family" placeholder="関連家族名 (任意)" class="p-2 border rounded-md shadow-sm">
+                    <input type="number" id="new-car-capacity" placeholder="定員 (例: 5)" class="p-2 border rounded-md shadow-sm">
+                </div>
+                <button id="add-car-button" class="mt-3 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200">
+                    車を追加
+                </button>
+            </div>
+        </section>
+
+    </div>
+
+    <script type="module">
+        import * as db from './db.js';
+
+        // --- DOM参照 ---
+        const familiesContainer = document.getElementById('families-container');
+        const carsContainer = document.getElementById('cars-container');
+        const addFamilyButton = document.getElementById('add-family-button');
+        const newFamilyNameInput = document.getElementById('new-family-name');
+        const addCarButton = document.getElementById('add-car-button');
+        
+        const messageContainer = document.getElementById('message');
+        const messageText = document.getElementById('message-text');
+        const messageClose = document.getElementById('message-close');
+        
+        const exportMasterButton = document.getElementById('export-master-button');
+        const importMasterInput = document.getElementById('import-master-input');
+
+        // --- 初期化 ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // DBを開く (デフォルトデータはindex.html側で投入される前提)
+                await db.openDB([], []);
+                await loadAllData();
+            } catch (err) {
+                showMessage(`データベースの読み込みに失敗しました: ${err.message}`, 'error');
+            }
+
+            // イベントリスナー
+            addFamilyButton.addEventListener('click', handleAddFamily);
+            addCarButton.addEventListener('click', handleAddCar);
+            messageClose.addEventListener('click', hideMessage);
+            
+            exportMasterButton.addEventListener('click', handleExportMasterData);
+            importMasterInput.addEventListener('change', handleImportMasterData);
+
+            // 動的に生成される要素へのイベントリスナー (イベント委任)
+            familiesContainer.addEventListener('click', handleFamilyAction);
+            familiesContainer.addEventListener('change', handleMemberUpdate);
+            carsContainer.addEventListener('click', handleCarAction);
+            carsContainer.addEventListener('change', handleCarUpdate);
+        });
+
+        // --- データ読み込み・描画 ---
+
+        async function loadAllData() {
+            await Promise.all([
+                loadFamilies(),
+                loadCars()
+            ]);
+        }
+
+        async function loadFamilies() {
+            familiesContainer.innerHTML = '';
+            const families = await db.getAllFamilies();
+            if (families.length === 0) {
+                 document.getElementById('families-loading').textContent = '家族データがありません。';
+                 return;
+            }
+            document.getElementById('families-loading')?.remove();
+            families.forEach(renderFamily);
+        }
+
+        async function loadCars() {
+            carsContainer.innerHTML = '';
+            const cars = await db.getAllCars();
+             if (cars.length === 0) {
+                 document.getElementById('cars-loading').textContent = '車データがありません。';
+                 return;
+            }
+            document.getElementById('cars-loading')?.remove();
+            cars.forEach(renderCar);
+        }
+
+        function renderFamily(family) {
+            const familyCard = document.createElement('div');
+            familyCard.className = 'family-card';
+            familyCard.dataset.familyName = family.familyName;
+            
+            familyCard.innerHTML = `
+                <div class="family-header">
+                    <input type="text" value="${family.familyName}" data-action="update-family-name" class="text-lg font-semibold p-1 border rounded" placeholder="家族名">
+                    <button data-action="delete-family" class="text-xs bg-red-500 hover:bg-red-600 text-white py-1 px-2 rounded">家族を削除</button>
+                </div>
+                <div class="member-list">
+                    <div class="member-item hidden sm:grid font-semibold text-sm text-gray-600">
+                        <span>ID (自動)</span>
+                        <span>名前</span>
+                        <span>タイプ</span>
+                        <span>当番対象</span>
+                        <span class="col-span-2">データ (JSON)</span>
+                    </div>
+                    ${family.members.map(m => renderMember(m, family.familyName)).join('')}
+                    <button data-action="add-member" class="mt-2 text-sm bg-blue-500 hover:bg-blue-600 text-white py-1 px-3 rounded shadow w-full sm:w-auto">
+                        メンバー追加
+                    </button>
+                </div>
+            `;
+            familiesContainer.appendChild(familyCard);
+        }
+
+        function renderMember(member, familyName) {
+            // member.data が存在しないか空のオブジェクトの場合のフォールバック
+            const dataString = (member.data && Object.keys(member.data).length > 0)
+                ? JSON.stringify(member.data)
+                : '{}';
+                
+            return `
+                <div class="member-item border-t pt-2" data-member-id="${member.id}">
+                    <input type="text" value="${member.id}" data-type="id" class="p-1 border rounded text-sm bg-gray-100" readonly title="IDは自動採番されます">
+                    <input type="text" value="${member.name}" data-type="name" class="p-1 border rounded text-sm" placeholder="名前">
+                    <select data-type="type" class="p-1 border rounded text-sm">
+                        <option value="選手" ${member.type === '選手' ? 'selected' : ''}>選手</option>
+                        <option value="保護者" ${member.type === '保護者' ? 'selected' : ''}>保護者</option>
+                        <option value="兄弟" ${member.type === '兄弟' ? 'selected' : ''}>兄弟</option>
+                        <option value="その他" ${member.type === 'その他' ? 'selected' : ''}>その他</option>
+                    </select>
+                    <div class="flex items-center justify-center">
+                         <input type="checkbox" data-type="isFlagTarget" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" ${member.isFlagTarget ? 'checked' : ''}>
+                    </div>
+                    <textarea data-type="data" rows="2" class="p-1 border rounded text-sm sm:col-span-2" placeholder='{"grade": "5年", "school": "東小"}' title='JSON形式で入力: {"key": "value"}'
+                    >${dataString}</textarea>
+                    <button data-action="delete-member" class="text-xs bg-red-500 hover:bg-red-600 text-white py-1 px-2 rounded h-full sm:col-start-6">削除</button>
+                </div>
+            `;
+        }
+
+        function renderCar(car) {
+            const carCard = document.createElement('div');
+            carCard.className = 'p-4 bg-white rounded-lg shadow space-y-2';
+            carCard.dataset.carId = car.id;
+            
+            carCard.innerHTML = `
+                <div>
+                    <label class="block text-xs font-medium text-gray-500">ID (変更不可)</label>
+                    <input type="text" value="${car.id}" data-type="id" class="p-1 border rounded text-sm w-full bg-gray-100" readonly>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500">車の名前</label>
+                    <input type="text" value="${car.name}" data-type="name" class="p-1 border rounded text-sm w-full">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500">関連家族名</label>
+                    <input type="text" value="${car.familyName}" data-type="familyName" class="p-1 border rounded text-sm w-full">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500">定員</label>
+                    <input type="number" value="${car.baseCapacity}" data-type="baseCapacity" class="p-1 border rounded text-sm w-full">
+                </div>
+                <button data-action="delete-car" class="mt-2 w-full text-sm bg-red-500 hover:bg-red-600 text-white py-1 px-3 rounded shadow">
+                    車を削除
+                </button>
+            `;
+            carsContainer.appendChild(carCard);
+        }
+
+
+        // --- イベントハンドラ (家族) ---
+
+        async function handleAddFamily() {
+            const familyName = newFamilyNameInput.value.trim();
+            if (!familyName) {
+                showMessage('家族名を入力してください。', 'error');
+                return;
+            }
+            
+            try {
+                // 既存の家族名と重複チェック
+                const existing = await db.getFamily(familyName);
+                if (existing) {
+                    showMessage(`家族名「${familyName}」は既に使用されています。`, 'error');
+                    return;
+                }
+                
+                const newFamily = {
+                    familyName: familyName,
+                    members: []
+                };
+                await db.addFamily(newFamily);
+                renderFamily(newFamily);
+                newFamilyNameInput.value = '';
+                showMessage(`家族「${familyName}」を追加しました。`, 'info');
+            } catch (err) {
+                showMessage(`家族の追加に失敗しました: ${err.message}`, 'error');
+            }
+        }
+
+        async function handleFamilyAction(e) {
+            const target = e.target;
+            const familyCard = target.closest('.family-card');
+            if (!familyCard) return;
+            
+            const familyName = familyCard.dataset.familyName;
+            const action = target.dataset.action;
+
+            if (action === 'delete-family') {
+                 if (confirm(`本当に家族「${familyName}」を削除しますか？\nこの操作は取り消せません。`)) {
+                    try {
+                        await db.deleteFamily(familyName);
+                        familyCard.remove();
+                        showMessage(`家族「${familyName}」を削除しました。`, 'info');
+                    } catch (err) {
+                        showMessage(`家族の削除に失敗しました: ${err.message}`, 'error');
+                    }
+                 }
+            }
+            
+            if (action === 'add-member') {
+                try {
+                    const family = await db.getFamily(familyName);
+                    if (!family) return;
+
+                    // 新しいメンバーのデフォルトオブジェクト
+                    const newMember = {
+                        id: `p${Date.now()}`, // ユニークIDを生成
+                        name: '新しいメンバー',
+                        type: '選手',
+                        isFlagTarget: false,
+                        data: {}
+                    };
+                    
+                    family.members.push(newMember);
+                    await db.updateFamily(family);
+
+                    // メンバーリスト部分だけを再描画（またはカード全体を再描画）
+                    await loadFamilies(); // シンプルに全体を再読み込み
+                    showMessage(`「${familyName}」に新しいメンバーを追加しました。`, 'info');
+                } catch (err) {
+                     showMessage(`メンバーの追加に失敗しました: ${err.message}`, 'error');
+                }
+            }
+            
+            if (action === 'delete-member') {
+                const memberItem = target.closest('.member-item');
+                const memberId = memberItem.dataset.memberId;
+                if (!memberId) return;
+
+                 if (confirm(`本当にこのメンバー (ID: ${memberId}) を削除しますか？`)) {
+                    try {
+                        const family = await db.getFamily(familyName);
+                        if (!family) return;
+                        
+                        family.members = family.members.filter(m => m.id !== memberId);
+                        await db.updateFamily(family);
+                        
+                        memberItem.remove();
+                        showMessage(`メンバー (ID: ${memberId}) を削除しました。`, 'info');
+                    } catch (err) {
+                        showMessage(`メンバーの削除に失敗しました: ${err.message}`, 'error');
+                    }
+                 }
+            }
+        }
+        
+        async function handleMemberUpdate(e) {
+            const target = e.target;
+            const memberItem = target.closest('.member-item');
+            const familyCard = target.closest('.family-card');
+            if (!memberItem || !familyCard) return;
+
+            const familyName = familyCard.dataset.familyName;
+            const memberId = memberItem.dataset.memberId;
+            const type = target.dataset.type;
+            
+            if (type === 'id') return; // IDは変更不可
+
+            try {
+                const family = await db.getFamily(familyName);
+                if (!family) return;
+                
+                const member = family.members.find(m => m.id === memberId);
+                if (!member) return;
+
+                // メンバーのデータを更新
+                if (target.type === 'checkbox') {
+                    member[type] = target.checked;
+                } else if (type === 'data') {
+                    try {
+                        const dataObj = JSON.parse(target.value || '{}');
+                        member[type] = dataObj;
+                        target.classList.remove('border-red-500'); // エラー解除
+                    } catch (jsonErr) {
+                         showMessage(`JSONの形式が正しくありません (メンバーID: ${memberId})。保存されません。`, 'error');
+                         target.classList.add('border-red-500'); // エラー表示
+                         return; // DBを更新しない
+                    }
+                } else {
+                    member[type] = target.value;
+                }
+
+                await db.updateFamily(family);
+                // console.log(`Updated member ${memberId} in ${familyName}`);
+                showSuccessMessage('更新しました');
+
+            } catch (err) {
+                 showMessage(`メンバー (ID: ${memberId}) の更新に失敗しました: ${err.message}`, 'error');
+            }
+        }
+        
+        // 家族名の変更
+        async function handleFamilyNameUpdate(e) {
+            const target = e.target;
+            const familyCard = target.closest('.family-card');
+            if (!familyCard || target.dataset.action !== 'update-family-name') return;
+            
+            const oldFamilyName = familyCard.dataset.familyName;
+            const newFamilyName = target.value.trim();
+            
+            if (oldFamilyName === newFamilyName) return; // 変更なし
+            
+            if (!newFamilyName) {
+                showMessage('家族名は空にできません。', 'error');
+                target.value = oldFamilyName; // 元に戻す
+                return;
+            }
+            
+            try {
+                // 新しい名前が既に存在するかチェック
+                const existing = await db.getFamily(newFamilyName);
+                if (existing) {
+                    showMessage(`家族名「${newFamilyName}」は既に使用されています。`, 'error');
+                    target.value = oldFamilyName; // 元に戻す
+                    return;
+                }
+                
+                const family = await db.getFamily(oldFamilyName);
+                if (!family) return;
+                
+                // データを新しい名前で保存し、古い名前のデータを削除（実質的な主キー変更）
+                family.familyName = newFamilyName;
+                await db.addFamily(family); // 新しい名前で追加
+                await db.deleteFamily(oldFamilyName); // 古い名前で削除
+                
+                familyCard.dataset.familyName = newFamilyName; // data属性を更新
+                showSuccessMessage(`家族名を「${oldFamilyName}」から「${newFamilyName}」に変更しました。`);
+                
+            } catch (err) {
+                 showMessage(`家族名の変更に失敗しました: ${err.message}`, 'error');
+                 target.value = oldFamilyName; // 元に戻す
+            }
+        }
+        // input要素からフォーカスが外れた時（onblurの代わり）に家族名を更新
+        familiesContainer.addEventListener('focusout', handleFamilyNameUpdate);
+
+
+        // --- イベントハンドラ (車) ---
+        
+        async function handleAddCar() {
+            const idInput = document.getElementById('new-car-id');
+            const nameInput = document.getElementById('new-car-name');
+            const familyInput = document.getElementById('new-car-family');
+            const capacityInput = document.getElementById('new-car-capacity');
+            
+            const id = idInput.value.trim();
+            const name = nameInput.value.trim();
+            const familyName = familyInput.value.trim(); // 任意
+            const baseCapacity = parseInt(capacityInput.value, 10);
+
+            if (!id || !name || !baseCapacity) {
+                showMessage('ID、車の名前、定員は必須です。', 'error');
+                return;
+            }
+            
+            try {
+                 const existing = await db.getCar(id);
+                 if (existing) {
+                     showMessage(`車ID「${id}」は既に使用されています。`, 'error');
+                     return;
+                 }
+                 
+                 const newCar = { id, name, familyName, baseCapacity };
+                 await db.addCar(newCar);
+                 renderCar(newCar);
+                 
+                 // 入力欄をクリア
+                 idInput.value = '';
+                 nameInput.value = '';
+                 familyInput.value = '';
+                 capacityInput.value = '';
+                 
+                 showMessage(`車「${name}」を追加しました。`, 'info');
+            } catch (err) {
+                 showMessage(`車の追加に失敗しました: ${err.message}`, 'error');
+            }
+        }
+
+        async function handleCarAction(e) {
+            const target = e.target;
+            const carCard = target.closest('[data-car-id]');
+            if (!carCard) return;
+            
+            const carId = carCard.dataset.carId;
+            const action = target.dataset.action;
+
+            if (action === 'delete-car') {
+                 if (confirm(`本当に車 (ID: ${carId}) を削除しますか？\nこの操作は取り消せません。`)) {
+                    try {
+                        await db.deleteCar(carId);
+                        carCard.remove();
+                        showMessage(`車 (ID: ${carId}) を削除しました。`, 'info');
+                    } catch (err) {
+                        showMessage(`車の削除に失敗しました: ${err.message}`, 'error');
+                    }
+                 }
+            }
+        }
+        
+        async function handleCarUpdate(e) {
+            const target = e.target;
+            const carCard = target.closest('[data-car-id]');
+            if (!carCard) return;
+
+            const carId = carCard.dataset.carId;
+            const type = target.dataset.type;
+            
+            if (type === 'id') return; // IDは変更不可
+
+            try {
+                const car = await db.getCar(carId);
+                if (!car) return;
+                
+                if (type === 'baseCapacity') {
+                    car[type] = parseInt(target.value, 10) || 0;
+                } else {
+                    car[type] = target.value;
+                }
+
+                await db.updateCar(car);
+                showSuccessMessage('更新しました');
+
+            } catch (err) {
+                 showMessage(`車 (ID: ${carId}) の更新に失敗しました: ${err.message}`, 'error');
+            }
+        }
+
+
+        // --- JSONインポート/エクスポート ---
+        
+        async function handleExportMasterData() {
+            try {
+                const [families, cars] = await Promise.all([
+                    db.getAllFamilies(),
+                    db.getAllCars()
+                ]);
+                
+                const masterData = { families, cars };
+                const jsonString = JSON.stringify(masterData, null, 2); 
+                
+                const blob = new Blob([jsonString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `car_assignment_master_${new Date().toISOString().slice(0,10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showMessage('現在のマスターデータをファイルに保存しました。', 'info');
+                
+            } catch (err) {
+                 showMessage(`マスターデータのエクスポートに失敗しました: ${err.message}`, 'error');
+            }
+        }
+        
+        function handleImportMasterData(e) {
+             const file = e.target.files[0];
+             if (!file) return;
+             
+             if (!confirm('本当にマスターデータを読み込みますか？\n現在保存されているデータはすべて上書きされます。')) {
+                 e.target.value = null; // ファイル選択をキャンセル
+                 return;
+             }
+             
+             const reader = new FileReader();
+             reader.onload = async (event) => {
+                 try {
+                     const masterData = JSON.parse(event.target.result);
+                     if (!masterData || !Array.isArray(masterData.families) || !Array.isArray(masterData.cars)) {
+                         throw new Error('JSONの形式が正しくありません。 "families" と "cars" の配列が必要です。');
+                     }
+                     
+                     // DBをクリア
+                     await db.clearFamilies();
+                     await db.clearCars();
+                     
+                     // 新しいデータを一括投入
+                     await db.bulkAddFamilies(masterData.families);
+                     await db.bulkAddCars(masterData.cars);
+                     
+                     // 画面を再読み込み
+                     await loadAllData();
+                     
+                     showMessage('マスターデータを読み込み、データベースを上書きしました。', 'info');
+                 
+                 } catch (err) {
+                     console.error('Error parsing master data JSON:', err);
+                     showMessage(`マスターデータの読み込みに失敗しました: ${err.message}`, 'error');
+                 } finally {
+                     e.target.value = null; // ファイル選択をリセット
+                 }
+             };
+             reader.readAsText(file);
+        }
+
+        // --- メッセージ表示 ---
+        let messageTimer = null;
+        function showMessage(message, type = 'info'){ 
+             messageText.innerHTML = message;
+             messageContainer.className = 'p-4 mb-4 border rounded-lg'; 
+             
+             if (messageTimer) clearTimeout(messageTimer);
+             
+             switch(type) {
+                 case 'error':
+                     messageContainer.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
+                     messageTimer = setTimeout(hideMessage, 5000); // エラーは5秒表示
+                     break;
+                 case 'success':
+                     messageContainer.classList.add('bg-green-100', 'border-green-400', 'text-green-700');
+                     messageTimer = setTimeout(hideMessage, 2000); // 成功は2秒表示
+                     break;
+                 default: // info
+                     messageContainer.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
+                     messageTimer = setTimeout(hideMessage, 3000); // 情報は3秒表示
+             }
+             messageContainer.classList.remove('hidden');
+        }
+        function showSuccessMessage(message) {
+            showMessage(message, 'success');
+        }
+        function hideMessage(){ 
+             if (messageTimer) clearTimeout(messageTimer);
+             messageTimer = null;
+             messageContainer.classList.add('hidden');
+        }
+
+    </script>
+</body>
+</html>
