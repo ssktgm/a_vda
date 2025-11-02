@@ -1,7 +1,7 @@
 // db.js: IndexedDBヘルパーモジュール
 
 const DB_NAME = 'CarDispatchDB';
-const DB_VERSION = 1;
+const DB_VERSION = 1; // バージョンは1のまま (スキーマ変更なし、インデックス追加しないため)
 const STORE_FAMILIES = 'families';
 const STORE_CARS = 'cars';
 
@@ -47,19 +47,23 @@ export function openDB(defaultFamilies = [], defaultCars = []) {
       }
 
       // デフォルトデータの投入 (トランザクションが完了する前に実行)
-      // 注意: このイベント内でデータ投入が完了するのを待つ必要がある
+      // ★ 修正: onupgradeneeded 内のトランザクション (event.target.transaction) を使う
       const tx = event.target.transaction;
       
       if (defaultFamilies.length > 0) {
           const familyStore = tx.objectStore(STORE_FAMILIES);
-          defaultFamilies.forEach(family => {
-              familyStore.put(family);
+          console.log('Populating default families in onupgradeneeded...');
+          defaultFamilies.forEach((family, index) => {
+              // ★ 修正: 呼び出し元でorderが付与されているはずだが、なければindexを付与
+              const familyWithOrder = { ...family, order: family.order ?? index }; 
+              familyStore.put(familyWithOrder);
           });
           console.log('Default families populated.');
       }
       
       if (defaultCars.length > 0) {
           const carStore = tx.objectStore(STORE_CARS);
+           console.log('Populating default cars in onupgradeneeded...');
           defaultCars.forEach(car => {
               carStore.put(car);
           });
@@ -132,22 +136,30 @@ export function bulkAddFamilies(families) {
         const store = tx.objectStore(STORE_FAMILIES);
         let count = 0;
         
+        if (families.length === 0) {
+            return resolve();
+        }
+
         families.forEach(family => {
             const request = store.put(family);
             request.onsuccess = () => {
                 count++;
                 if (count === families.length) {
-                    resolve(); // すべて成功
+                    // トランザクション自体の完了を待つ
                 }
             };
              request.onerror = (e) => {
                 tx.abort(); // 1件でも失敗したら中断
+                console.error('bulkAddFamilies error during put:', e.target.error);
                 reject(e.target.error);
              }
         });
 
         tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
+        tx.onerror = () => {
+             console.error('bulkAddFamilies transaction error:', tx.error);
+             reject(tx.error);
+        }
     });
 }
 
@@ -245,23 +257,31 @@ export function bulkAddCars(cars) {
         const tx = db.transaction(STORE_CARS, 'readwrite');
         const store = tx.objectStore(STORE_CARS);
         let count = 0;
+
+        if (cars.length === 0) {
+            return resolve();
+        }
         
         cars.forEach(car => {
             const request = store.put(car);
             request.onsuccess = () => {
                 count++;
                 if (count === cars.length) {
-                    resolve(); // すべて成功
+                    // トランザクション自体の完了を待つ
                 }
             };
              request.onerror = (e) => {
                 tx.abort(); // 1件でも失敗したら中断
+                console.error('bulkAddCars error during put:', e.target.error);
                 reject(e.target.error);
              }
         });
 
         tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
+        tx.onerror = () => {
+            console.error('bulkAddCars transaction error:', tx.error);
+            reject(tx.error);
+        }
     });
 }
 
@@ -295,3 +315,4 @@ export function clearCars() {
         request.onerror = () => reject(request.error);
     });
 }
+

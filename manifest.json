@@ -1,0 +1,23 @@
+{
+  "short_name": "配車調整",
+  "name": "配車調整アプリ",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/007bff/ffffff?text=配車",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://placehold.co/512x512/007bff/ffffff?text=配車",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#007bff",
+  "background_color": "#ffffff"
+}
+

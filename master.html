@@ -130,7 +130,32 @@
         document.addEventListener('DOMContentLoaded', async () => {
             try {
                 // DBを開く (デフォルトデータはindex.html側で投入される前提)
-                await db.openDB([], []);
+                await db.openDB([], []); // デフォルトデータは渡さない
+                
+                // ★ 新規: 既存データにorderがない場合のマイグレーション
+                const families = await db.getAllFamilies();
+                let familiesNeedUpdate = false;
+                let maxOrder = -1; // 0始まりのorderを考慮
+                (families || []).forEach((family) => {
+                    // orderがundefined, null の場合
+                    if (family.order === undefined || family.order === null) {
+                        family.order = 999 + (maxOrder > -1 ? maxOrder : 0); // 既存の順序を乱さないよう末尾に
+                        familiesNeedUpdate = true;
+                    }
+                    if (family.order > maxOrder) {
+                        maxOrder = family.order;
+                    }
+                });
+                
+                if (familiesNeedUpdate) {
+                    console.log("Migration: Adding 'order' to families in master.html...");
+                    families.sort((a, b) => (a.order) - (b.order)); // 既存の順序 + 新規(999+)
+                    families.forEach((family, index) => {
+                        family.order = index; // 0から再インデックス
+                    });
+                    await db.bulkAddFamilies(families);
+                }
+                
                 await loadAllData();
             } catch (err) {
                 showMessage(`データベースの読み込みに失敗しました: ${err.message}`, 'error');
@@ -147,6 +172,7 @@
             // 動的に生成される要素へのイベントリスナー (イベント委任)
             familiesContainer.addEventListener('click', handleFamilyAction);
             familiesContainer.addEventListener('change', handleMemberUpdate);
+            familiesContainer.addEventListener('focusout', handleFamilyNameUpdate); // ★ 家族名変更用
             carsContainer.addEventListener('click', handleCarAction);
             carsContainer.addEventListener('change', handleCarUpdate);
         });
@@ -163,12 +189,20 @@
         async function loadFamilies() {
             familiesContainer.innerHTML = '';
             const families = await db.getAllFamilies();
+            
             if (families.length === 0) {
                  document.getElementById('families-loading').textContent = '家族データがありません。';
                  return;
             }
             document.getElementById('families-loading')?.remove();
-            families.forEach(renderFamily);
+            
+            // ★ 修正: orderでソート
+            families.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+            
+            // ★ 修正: renderFamily に index と 配列長を渡す
+            families.forEach((family, index, arr) => {
+                renderFamily(family, index, arr.length);
+            });
         }
 
         async function loadCars() {
@@ -182,15 +216,30 @@
             cars.forEach(renderCar);
         }
 
-        function renderFamily(family) {
+        // ★ 修正: index と totalCount を引数に追加
+        function renderFamily(family, index, totalCount) {
             const familyCard = document.createElement('div');
             familyCard.className = 'family-card';
             familyCard.dataset.familyName = family.familyName;
+            familyCard.dataset.order = family.order; // ★ orderを保持
+            
+            // ★ 新規: 並び替えボタンのHTML
+            const moveUpDisabled = (index === 0) ? 'disabled' : '';
+            const moveDownDisabled = (index === totalCount - 1) ? 'disabled' : '';
+            const moveButtons = `
+                <div class="flex flex-col space-y-1">
+                    <button data-action="move-up" class="text-xs bg-gray-400 hover:bg-gray-500 text-white py-1 px-1 rounded disabled:opacity-30 disabled:cursor-not-allowed" ${moveUpDisabled}>▲ 上へ</button>
+                    <button data-action="move-down" class="text-xs bg-gray-400 hover:bg-gray-500 text-white py-1 px-1 rounded disabled:opacity-30 disabled:cursor-not-allowed" ${moveDownDisabled}>▼ 下へ</button>
+                </div>
+            `;
             
             familyCard.innerHTML = `
                 <div class="family-header">
                     <input type="text" value="${family.familyName}" data-action="update-family-name" class="text-lg font-semibold p-1 border rounded" placeholder="家族名">
-                    <button data-action="delete-family" class="text-xs bg-red-500 hover:bg-red-600 text-white py-1 px-2 rounded">家族を削除</button>
+                    <div class="flex items-center space-x-2">
+                        ${moveButtons} <!-- ★ 並び替えボタンを追加 -->
+                        <button data-action="delete-family" class="text-xs bg-red-500 hover:bg-red-600 text-white py-1 px-2 rounded">家族を削除</button>
+                    </div>
                 </div>
                 <div class="member-list">
                     <div class="member-item hidden sm:grid font-semibold text-sm text-gray-600">
@@ -208,6 +257,7 @@
             `;
             familiesContainer.appendChild(familyCard);
         }
+
 
         function renderMember(member, familyName) {
             // member.data が存在しないか空のオブジェクトの場合のフォールバック
@@ -282,12 +332,20 @@
                     return;
                 }
                 
+                // ★ 新規: 現在の最大のorderを取得
+                const families = await db.getAllFamilies();
+                const maxOrder = families.length > 0 ? Math.max(-1, ...families.map(f => f.order ?? -1)) : -1;
+                
                 const newFamily = {
                     familyName: familyName,
-                    members: []
+                    members: [],
+                    order: maxOrder + 1 // ★ orderを付与
                 };
                 await db.addFamily(newFamily);
-                renderFamily(newFamily);
+                
+                // ★ 修正: loadFamilies() でソートされた順序で再描画
+                await loadFamilies(); 
+                
                 newFamilyNameInput.value = '';
                 showMessage(`家族「${familyName}」を追加しました。`, 'info');
             } catch (err) {
@@ -309,6 +367,7 @@
                         await db.deleteFamily(familyName);
                         familyCard.remove();
                         showMessage(`家族「${familyName}」を削除しました。`, 'info');
+                        // ★ 削除後に順序を振り直す必要はない（欠番があってもソートは機能する）
                     } catch (err) {
                         showMessage(`家族の削除に失敗しました: ${err.message}`, 'error');
                     }
@@ -359,6 +418,43 @@
                         showMessage(`メンバーの削除に失敗しました: ${err.message}`, 'error');
                     }
                  }
+            }
+            
+            // ★ 新規: 並び替え処理
+            if (action === 'move-up' || action === 'move-down') {
+                try {
+                    const families = (await db.getAllFamilies()).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+                    const currentIndex = families.findIndex(f => f.familyName === familyName);
+                    
+                    if (currentIndex === -1) return;
+
+                    let targetIndex = -1;
+                    if (action === 'move-up' && currentIndex > 0) {
+                        targetIndex = currentIndex - 1;
+                    } else if (action === 'move-down' && currentIndex < families.length - 1) {
+                        targetIndex = currentIndex + 1;
+                    }
+                    
+                    if (targetIndex !== -1) {
+                        const familyA = families[currentIndex];
+                        const familyB = families[targetIndex];
+                        
+                        // orderプロパティを入れ替える
+                        const tempOrder = familyA.order;
+                        familyA.order = familyB.order;
+                        familyB.order = tempOrder;
+                        
+                        // DB更新
+                        await db.updateFamily(familyA);
+                        await db.updateFamily(familyB);
+                        
+                        // 画面再描画
+                        await loadFamilies();
+                        showSuccessMessage('並び順を変更しました');
+                    }
+                } catch (err) {
+                    showMessage(`並び替えに失敗しました: ${err.message}`, 'error');
+                }
             }
         }
         
@@ -437,7 +533,10 @@
                 if (!family) return;
                 
                 // データを新しい名前で保存し、古い名前のデータを削除（実質的な主キー変更）
+                const oldOrder = family.order; // ★ orderを引き継ぐ
                 family.familyName = newFamilyName;
+                family.order = oldOrder;
+                
                 await db.addFamily(family); // 新しい名前で追加
                 await db.deleteFamily(oldFamilyName); // 古い名前で削除
                 
@@ -449,8 +548,6 @@
                  target.value = oldFamilyName; // 元に戻す
             }
         }
-        // input要素からフォーカスが外れた時（onblurの代わり）に家族名を更新
-        familiesContainer.addEventListener('focusout', handleFamilyNameUpdate);
 
 
         // --- イベントハンドラ (車) ---
@@ -553,6 +650,9 @@
                     db.getAllCars()
                 ]);
                 
+                // ★ 念のためエクスポート時もソート
+                families.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+                
                 const masterData = { families, cars };
                 const jsonString = JSON.stringify(masterData, null, 2); 
                 
@@ -588,6 +688,17 @@
                      if (!masterData || !Array.isArray(masterData.families) || !Array.isArray(masterData.cars)) {
                          throw new Error('JSONの形式が正しくありません。 "families" と "cars" の配列が必要です。');
                      }
+                     
+                     // ★ 新規: インポートデータにorderを付与 (ない場合)
+                     let maxOrder = -1;
+                     masterData.families.forEach((family, index) => {
+                         if (family.order === undefined || family.order === null) {
+                             family.order = index; // orderがなければindexで採番
+                         }
+                         if (family.order > maxOrder) maxOrder = family.order;
+                     });
+                     // 念のためorderでソートしてから投入
+                     masterData.families.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
                      
                      // DBをクリア
                      await db.clearFamilies();
@@ -647,3 +758,4 @@
     </script>
 </body>
 </html>
+

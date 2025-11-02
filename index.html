@@ -212,6 +212,7 @@
         
         // --- ★ 新規: DB初回投入用のデフォルトデータ ---
         // (元のハードコードされたデータをここに移動)
+        // (★ 修正: order プロパティはDB側で付与するため、ここでは不要)
         
         const DEFAULT_FAMILIES = [
             { familyName: '小高家', members: [ { id: 'p1', name: '斗愛', type: '選手', isFlagTarget: true, data: { grade: '5年', school: '東小', other: '', memo: '' } }, { id: 'p2', name: '小高監督', type: '保護者', data: { memo: '' } }, { id: 'p3', name: '小高母', type: '保護者', data: { memo: '' } }, { id: 'p22', name: '愛之佑', type: '選手', isFlagTarget: true, data: { grade: '3年', school: '東小', other: '', memo: '' } } ] },
@@ -289,10 +290,6 @@
         const copyTextOutputButton = document.getElementById('copy-text-output-button');
         const toggleDetailsButton = document.getElementById('toggle-details-button');
         
-        // ★ 削除: マスター管理ボタンの参照
-        // const exportMasterButton = document.getElementById('export-master-button');
-        // const importMasterInput = document.getElementById('import-master-input');
-
         const parkingDesignatedNameEl = document.getElementById('parking-designated-name');
         const parkingDesignatedLimitEl = document.getElementById('parking-designated-limit');
         const parkingDesignatedMemoEl = document.getElementById('parking-designated-memo');
@@ -321,19 +318,21 @@
 
             // ★ 新規: DBからマスターデータを読み込む
             try {
-                // DBを開き、初回であればデフォルトデータを投入
+                // ★ 修正: DBを開き、初回であればデフォルトデータを投入
+                // (order付与はdb.jsのonupgradeneededが担当)
                 await db.openDB(DEFAULT_FAMILIES, DEFAULT_AVAILABLE_CARS_INFO);
                 // DBから最新のデータを読み込む
                 await loadMasterDataFromDB();
             } catch (err) {
                 showMessage(`マスターデータの読み込みに失敗しました: ${err.message}. アプリが正しく動作しない可能性があります。`, 'error');
                 // エラー時もデフォルトデータでフォールバックする
-                FAMILIES = DEFAULT_FAMILIES;
+                // ★ 修正: orderを付与
+                FAMILIES = DEFAULT_FAMILIES.map((f, i) => ({ ...f, order: i })); 
                 AVAILABLE_CARS_INFO = DEFAULT_AVAILABLE_CARS_INFO;
             }
 
             // ★ 修正: DB読み込み後に描画処理を実行
-            ALL_PARTICIPANTS_FLAT = FAMILIES.flatMap(f => f.members);
+            // (ALL_PARTICIPANTS_FLATの生成はloadMasterDataFromDB内へ移動)
             initializeParticipantData(); 
             renderParticipantList();
             renderCarList();
@@ -355,60 +354,86 @@
             showTextOutputButton.addEventListener('click', handleShowTextOutput);
             copyTextOutputButton.addEventListener('click', handleCopyTextOutput);
             toggleDetailsButton.addEventListener('click', handleToggleDetails);
-
-            // ★ 削除: マスター管理ボタンのイベントリスナー
-            // exportMasterButton.addEventListener('click', handleExportMasterData);
-            // importMasterInput.addEventListener('change', handleImportMasterData);
         });
         
-        // ★ 新規: DBからマスターデータを読み込む関数
+        // ★ 修正: DBからマスターデータを読み込む関数
         async function loadMasterDataFromDB() {
-            const [families, cars] = await Promise.all([
-                db.getAllFamilies(),
-                db.getAllCars()
-            ]);
-
-            if (families.length === 0 || cars.length === 0) {
-                // DBが空の場合（onupgradeneededが完了する前や失敗した場合など）
-                // デフォルトデータを使用し、DBへの投入を（再）試行する
-                console.warn("IndexedDB is empty, trying to populate default data...");
-                FAMILIES = DEFAULT_FAMILIES;
-                AVAILABLE_CARS_INFO = DEFAULT_AVAILABLE_CARS_INFO;
-                try {
-                    // 既存のデータをクリアしてから一括追加
-                    await db.clearFamilies();
-                    await db.clearCars();
-                    await db.bulkAddFamilies(DEFAULT_FAMILIES);
-                    await db.bulkAddCars(DEFAULT_AVAILABLE_CARS_INFO);
-                } catch (e) {
-                     console.error("Failed to populate default data:", e);
-                     showMessage("DBへの初回データ投入に失敗しました。", "error");
-                }
-            } else {
-                 // DBから読み込んだデータを使用
-                FAMILIES = families;
-                AVAILABLE_CARS_INFO = cars;
-                console.log("Master data loaded from IndexedDB.");
+             let families, cars;
+            try {
+                [families, cars] = await Promise.all([
+                    db.getAllFamilies(),
+                    db.getAllCars()
+                ]);
+            } catch (dbErr) {
+                 console.error("Failed to read from DB, using defaults:", dbErr);
+                 // openDB失敗時や読み取り失敗時のフォールバック
+                 families = DEFAULT_FAMILIES.map((f, i) => ({ ...f, order: i }));
+                 cars = DEFAULT_AVAILABLE_CARS_INFO;
             }
+
+            // ★ 新規: 既存データにorderがない場合のマイグレーション
+            let familiesNeedUpdate = false;
+            let maxOrder = -1; // 0始まりのorderを考慮
+            (families || []).forEach((family) => {
+                // orderがundefined, null の場合
+                if (family.order === undefined || family.order === null) {
+                    family.order = 999 + (maxOrder > -1 ? maxOrder : 0); // 既存の順序を乱さないよう末尾に
+                    familiesNeedUpdate = true;
+                }
+                if (family.order > maxOrder) {
+                    maxOrder = family.order;
+                }
+            });
+            
+            if (familiesNeedUpdate) {
+                console.log("Migration: Adding 'order' to families...");
+                families.sort((a, b) => (a.order) - (b.order)); // 既存の順序 + 新規(999+)
+                families.forEach((family, index) => {
+                    family.order = index; // 0から再インデックス
+                });
+                try {
+                    await db.bulkAddFamilies(families);
+                } catch (updateErr) {
+                    console.error("Failed to update families with order:", updateErr);
+                }
+            }
+            
+            // ★ 修正: orderでソート
+            FAMILIES = (families || []).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+            AVAILABLE_CARS_INFO = cars || DEFAULT_AVAILABLE_CARS_INFO;
+
+            // DBが空だった場合の処理 (openDBでデータ投入されたはずだが念のため)
+            if (FAMILIES.length === 0 && DEFAULT_FAMILIES.length > 0) {
+                 console.warn("FAMILIES empty, repopulating defaults.");
+                 FAMILIES = DEFAULT_FAMILIES.map((f, i) => ({ ...f, order: i }));
+                 await db.bulkAddFamilies(FAMILIES); // DBにも書き込む
+            }
+            if (AVAILABLE_CARS_INFO.length === 0 && DEFAULT_AVAILABLE_CARS_INFO.length > 0) {
+                 console.warn("CARS empty, repopulating defaults.");
+                 AVAILABLE_CARS_INFO = DEFAULT_AVAILABLE_CARS_INFO;
+                 await db.bulkAddCars(AVAILABLE_CARS_INFO); // DBにも書き込む
+            }
+            
+            // ★ 新規: ALL_PARTICIPANTS_FLAT をここで生成
+            ALL_PARTICIPANTS_FLAT = FAMILIES.flatMap(f => f.members);
         }
 
         // 参加者データ（備考含む）を初期化
         function initializeParticipantData() {
             participantData.clear(); 
-            FAMILIES.forEach(family => {
-                family.members.forEach(member => {
-                    const defaultData = { 
-                        grade: '', school: '', other: '', memo: '',
-                        ...(member.data || {}) 
-                    };
-                    
-                    if (!member.isFlagTarget) {
-                        defaultData.grade = '';
-                        defaultData.school = '';
-                        defaultData.other = '';
-                    }
-                    participantData.set(member.id, defaultData);
-                });
+            // ★ 修正: ALL_PARTICIPANTS_FLAT を使う
+            ALL_PARTICIPANTS_FLAT.forEach(member => {
+                const defaultData = { 
+                    grade: '', school: '', other: '', memo: '',
+                    ...(member.data || {}) 
+                };
+                
+                if (!member.isFlagTarget) {
+                    defaultData.grade = '';
+                    defaultData.school = '';
+                    defaultData.other = '';
+                }
+                participantData.set(member.id, defaultData);
             });
         }
 
@@ -420,6 +445,7 @@
                  return;
             }
 
+            // ★ 修正: FAMILIES は既に order でソート済み
             FAMILIES.forEach(family => {
                 const details = document.createElement('details');
                 details.className = 'bg-gray-50 rounded border';
@@ -1179,9 +1205,6 @@
               const textArea = document.createElement('textarea'); textArea.value = text; textArea.style.position = 'fixed'; textArea.style.opacity = '0'; document.body.appendChild(textArea); textArea.focus(); textArea.select(); try { const successful = document.execCommand('copy'); if (successful) { showMessage('クリップボードにコピーしました。', 'info'); } else { showMessage('コピーに失敗しました。', 'error'); } } catch (err) { showMessage('コピーに失敗しました。', 'error'); } document.body.removeChild(textArea);
         }
         
-        // ★ 削除: handleExportMasterData
-        // ★ 削除: handleImportMasterData
-
     </script>
 
     <!-- PWA対応: Service Workerの登録 -->
