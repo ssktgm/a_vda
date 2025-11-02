@@ -49,7 +49,7 @@
         
         /* 選択中のチェックボックスのスタイル */
         .swap-selected {
-            background-color: #DBEAFE; /* blue-100 */
+            background-color: #DBAFE; /* blue-100 */
         }
         .swap-selected > label, .swap-selected label { /* ラベル自体、またはラベルを含む親 */
             font-weight: 600; /* semibold */
@@ -104,15 +104,21 @@
                             <option value="">保存済みデータを選択...</option>
                             <!-- JSで描画 -->
                         </select>
-                        <button id="restore-state-button" class="mt-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-3 rounded-lg shadow transition duration-200">復元</button>
+                        <!-- ★ 修正: 復元ボタンと削除ボタン -->
+                        <button id="restore-state-button" class="mt-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-3 rounded-lg shadow transition duration-200" title="選択した状態を復元">復元</button>
+                        <button id="delete-state-button" class="mt-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-lg shadow transition duration-200" title="選択した状態を削除">削除</button>
                     </div>
                 </div>
 
                 <!-- マスター管理 -->
-                <div class="sm:col-span-2 mt-2">
+                <div class="sm:col-span-2 mt-2 space-y-2">
                      <a href="./master.html" class="w-full block bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200 text-center">
                         マスターデータ管理 (選手名簿・車リスト)
                     </a>
+                    <!-- ★ 新規: DB初期化ボタン -->
+                     <button id="clear-all-data-button" class="w-full block bg-red-800 hover:bg-red-900 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200 text-center">
+                        キャッシュ全クリア (DB初期化)
+                    </button>
                 </div>
             </div>
         </section>
@@ -174,7 +180,9 @@
                                 <option value="">保存済み駐車場から復元...</option>
                                 <!-- JSで描画 -->
                             </select>
-                            <button id="save-parking-button" class="mt-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-3 rounded-lg shadow transition duration-200">保存</button>
+                            <!-- ★ 修正: 削除ボタンを追加 -->
+                            <button id="save-parking-button" class="mt-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-3 rounded-lg shadow transition duration-200" title="現在の入力内容を保存">保存</button>
+                            <button id="delete-parking-button" class="mt-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-lg shadow transition duration-200" title="選択した駐車場を削除">削除</button>
                         </div>
                     </div>
                     
@@ -336,6 +344,10 @@
         const restoreStateButton = document.getElementById('restore-state-button');
         const saveParkingButton = document.getElementById('save-parking-button');
         const restoreParkingSelect = document.getElementById('restore-parking-select');
+        // ★ 新規: 削除ボタンとクリアボタン
+        const deleteStateButton = document.getElementById('delete-state-button');
+        const deleteParkingButton = document.getElementById('delete-parking-button');
+        const clearAllDataButton = document.getElementById('clear-all-data-button');
 
 
         // --- ★ 修正: 初期化処理 ---
@@ -405,6 +417,10 @@
             restoreStateButton.addEventListener('click', handleRestoreState);
             saveParkingButton.addEventListener('click', handleSaveParking);
             restoreParkingSelect.addEventListener('change', handleRestoreParking);
+            // ★ 新規: 削除・クリアボタンのリスナー
+            deleteStateButton.addEventListener('click', handleDeleteState);
+            deleteParkingButton.addEventListener('click', handleDeleteParking);
+            clearAllDataButton.addEventListener('click', handleClearAllData);
 
         });
         
@@ -1283,7 +1299,9 @@
                 parkingLots.forEach(parking => {
                     const option = document.createElement('option');
                     option.value = parking.id;
-                    option.textContent = `${parking.name} (制限:${parking.limit || 'なし'})`;
+                    // ★ 修正: 名称 + 日付で表示
+                    const date = new Date(parking.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+                    option.textContent = `${parking.name} (${date})`;
                     // optionにデータを保持させておく（復元時に再クエリしないため）
                     option.dataset.name = parking.name;
                     option.dataset.limit = parking.limit;
@@ -1342,20 +1360,27 @@
         }
 
         async function handleSaveParking() {
-            const name = parkingDesignatedNameEl.value.trim();
+            const nameInput = parkingDesignatedNameEl.value.trim();
             const limit = parseInt(parkingDesignatedLimitEl.value, 10) || 0;
             const memo = parkingDesignatedMemoEl.value.trim();
 
-            if (!name) {
+            if (!nameInput) {
                 showMessage("指定駐車場の名称を入力してください。", "warning");
                 return;
             }
             
+            // ★ 新規: 名称をプロンプトで聞く
+            const defaultName = `${nameInput} (${new Date().toLocaleDateString('ja-JP')})`;
+            const name = prompt("この駐車場の保存名を入力してください:", defaultName);
+            if (name === null) return; // キャンセル
+            
             const parkingData = {
-                name: name,
-                limit: limit,
-                memo: memo,
-                timestamp: Date.now()
+                name: name || defaultName, // ★ 保存名
+                limit: limit, // ★ 台数
+                memo: memo, // ★ 備考
+                timestamp: Date.now(),
+                 // ★ 復元用に、入力されていた名称自体も保存しておく
+                originalName: nameInput 
             };
 
             try {
@@ -1373,14 +1398,69 @@
             if (!parkingId) return;
 
             // optionのdatasetからデータを復元（DB再クエリ不要）
-            parkingDesignatedNameEl.value = selectedOption.dataset.name;
+            // ★ 修正: originalName を復元（もしあれば）。なければnameを復元
+            parkingDesignatedNameEl.value = selectedOption.dataset.originalName || selectedOption.dataset.name;
             parkingDesignatedLimitEl.value = selectedOption.dataset.limit;
             parkingDesignatedMemoEl.value = selectedOption.dataset.memo;
             
-            showMessage(`駐車場「${selectedOption.dataset.name}」の情報を入力欄に復元しました。`, 'info');
+            showMessage(`駐車場「${selectedOption.textContent}」の情報を入力欄に復元しました。`, 'info');
             
             // 選択肢をリセット
             e.target.value = "";
+        }
+        
+        // ★ 新規: 状態削除
+        async function handleDeleteState() {
+            const stateId = parseInt(restoreStateSelect.value, 10);
+            if (!stateId) {
+                showMessage("削除する状態を選択してください。", "warning");
+                return;
+            }
+            const selectedText = restoreStateSelect.options[restoreStateSelect.selectedIndex].text;
+
+            if (confirm(`本当にこの状態を削除しますか？\n\n${selectedText}`)) {
+                try {
+                    await db.deleteSavedState(stateId);
+                    await loadSavedStates(); // ドロップダウンを更新
+                    showMessage(`状態「${selectedText}」を削除しました。`, 'info');
+                } catch (err) {
+                    showMessage(`状態の削除に失敗しました: ${err.message}`, 'error');
+                }
+            }
+        }
+
+        // ★ 新規: 駐車場削除
+        async function handleDeleteParking() {
+            const parkingId = parseInt(restoreParkingSelect.value, 10);
+            if (!parkingId) {
+                showMessage("削除する駐車場を選択してください。", "warning");
+                return;
+            }
+            const selectedText = restoreParkingSelect.options[restoreParkingSelect.selectedIndex].text;
+
+            if (confirm(`本当にこの駐車場データを削除しますか？\n\n${selectedText}`)) {
+                try {
+                    await db.deleteSavedParking(parkingId);
+                    await loadSavedParking(); // ドロップダウンを更新
+                    showMessage(`駐車場「${selectedText}」を削除しました。`, 'info');
+                } catch (err) {
+                    showMessage(`駐車場の削除に失敗しました: ${err.message}`, 'error');
+                }
+            }
+        }
+        
+        // ★ 新規: DB初期化
+        async function handleClearAllData() {
+            if (confirm("本当にすべてのデータを初期化しますか？\n\n・選手名簿・車リスト (マスターデータ)\n・保存済みの状態\n・保存済みの駐車場\n\nすべてが削除され、初期状態に戻ります。\nこの操作は取り消せません。")) {
+                try {
+                    await db.clearAllData();
+                    showMessage('すべてのデータを初期化しました。ページをリロードします。', 'info');
+                    // データをクリアした後、リロードして openDB の初回データ投入ロジックを再実行させる
+                    setTimeout(() => location.reload(), 1500);
+                } catch (err) {
+                     showMessage(`データの初期化に失敗しました: ${err.message}`, 'error');
+                }
+            }
         }
         
     </script>
@@ -1402,4 +1482,5 @@
 
 </body>
 </html>
+
 
