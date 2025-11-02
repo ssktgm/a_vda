@@ -1,9 +1,12 @@
 // db.js: IndexedDBヘルパーモジュール
 
 const DB_NAME = 'CarDispatchDB';
-const DB_VERSION = 1; // バージョンは1のまま (スキーマ変更なし、インデックス追加しないため)
+const DB_VERSION = 2; // ★ バージョンを2に更新
 const STORE_FAMILIES = 'families';
 const STORE_CARS = 'cars';
+// ★ 新規: ストア名
+const STORE_SAVED_STATES = 'savedStates';
+const STORE_SAVED_PARKING = 'savedParking';
 
 let db;
 
@@ -35,45 +38,66 @@ export function openDB(defaultFamilies = [], defaultCars = []) {
     request.onupgradeneeded = (event) => {
       console.log('IndexedDB upgrade needed...');
       const tempDb = event.target.result;
-      
-      // 家族ストア (主キー: familyName)
-      if (!tempDb.objectStoreNames.contains(STORE_FAMILIES)) {
-        tempDb.createObjectStore(STORE_FAMILIES, { keyPath: 'familyName' });
-      }
-
-      // 車ストア (主キー: id)
-      if (!tempDb.objectStoreNames.contains(STORE_CARS)) {
-        tempDb.createObjectStore(STORE_CARS, { keyPath: 'id' });
-      }
-
-      // デフォルトデータの投入 (トランザクションが完了する前に実行)
-      // ★ 修正: onupgradeneeded 内のトランザクション (event.target.transaction) を使う
       const tx = event.target.transaction;
-      
-      if (defaultFamilies.length > 0) {
-          const familyStore = tx.objectStore(STORE_FAMILIES);
-          console.log('Populating default families in onupgradeneeded...');
-          defaultFamilies.forEach((family, index) => {
-              // ★ 修正: 呼び出し元でorderが付与されているはずだが、なければindexを付与
-              const familyWithOrder = { ...family, order: family.order ?? index }; 
-              familyStore.put(familyWithOrder);
-          });
-          console.log('Default families populated.');
+      const oldVersion = event.oldVersion;
+
+      // --- v1 (初期) ---
+      if (oldVersion < 1) {
+          // 家族ストア (主キー: familyName)
+          if (!tempDb.objectStoreNames.contains(STORE_FAMILIES)) {
+            tempDb.createObjectStore(STORE_FAMILIES, { keyPath: 'familyName' });
+          }
+
+          // 車ストア (主キー: id)
+          if (!tempDb.objectStoreNames.contains(STORE_CARS)) {
+            tempDb.createObjectStore(STORE_CARS, { keyPath: 'id' });
+          }
+          
+          // v1のデフォルトデータ投入
+          if (defaultFamilies.length > 0) {
+              const familyStore = tx.objectStore(STORE_FAMILIES);
+              console.log('Populating default families in onupgradeneeded (v1)...');
+              defaultFamilies.forEach((family, index) => {
+                  const familyWithOrder = { ...family, order: family.order ?? index }; 
+                  familyStore.put(familyWithOrder);
+              });
+              console.log('Default families populated (v1).');
+          }
+          
+          if (defaultCars.length > 0) {
+              const carStore = tx.objectStore(STORE_CARS);
+               console.log('Populating default cars in onupgradeneeded (v1)...');
+              defaultCars.forEach(car => {
+                  carStore.put(car);
+              });
+              console.log('Default cars populated (v1).');
+          }
+      }
+
+      // --- ★ v2 (状態保存・駐車場保存) ---
+      if (oldVersion < 2) {
+          // 保存済み状態ストア
+          if (!tempDb.objectStoreNames.contains(STORE_SAVED_STATES)) {
+              const statesStore = tempDb.createObjectStore(STORE_SAVED_STATES, { keyPath: 'id', autoIncrement: true });
+              // タイムスタンプでソート・検索するためにインデックス作成
+              statesStore.createIndex('timestamp', 'timestamp', { unique: false });
+          }
+          // 保存済み駐車場ストア
+          if (!tempDb.objectStoreNames.contains(STORE_SAVED_PARKING)) {
+              const parkingStore = tempDb.createObjectStore(STORE_SAVED_PARKING, { keyPath: 'id', autoIncrement: true });
+              // タイムスタンプでソート・検索するためにインデックス作成
+              parkingStore.createIndex('timestamp', 'timestamp', { unique: false });
+              // ★ 名称でも検索・重複削除できるようにインデックス作成
+              parkingStore.createIndex('name', 'name', { unique: false }); 
+          }
       }
       
-      if (defaultCars.length > 0) {
-          const carStore = tx.objectStore(STORE_CARS);
-           console.log('Populating default cars in onupgradeneeded...');
-          defaultCars.forEach(car => {
-              carStore.put(car);
-          });
-          console.log('Default cars populated.');
-      }
     };
   });
 }
 
 // --- 家族 (Families) ---
+// (変更なし)
 
 /**
  * 指定された家族を取得します。
@@ -196,6 +220,7 @@ export function clearFamilies() {
 
 
 // --- 車 (Cars) ---
+// (変更なし)
 
 /**
  * 指定されたIDの車を取得します。
@@ -313,6 +338,170 @@ export function clearCars() {
         const request = store.clear();
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
+    });
+}
+
+// --- ★ 新規: 保存済み状態 (Saved States) ---
+
+/**
+ * IDで単一の保存済み状態を取得します。
+ * @param {number} id - 取得する状態のID
+ * @returns {Promise<Object|undefined>} 状態データ
+ */
+export function getSavedState(id) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_STATES, 'readonly');
+        const store = tx.objectStore(STORE_SAVED_STATES);
+        const request = store.get(id);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * すべての保存済み状態をタイムスタンプ降順で取得します。
+ * @returns {Promise<Array>} 状態データの配列
+ */
+export function getAllSavedStates() {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_STATES, 'readonly');
+        const store = tx.objectStore(STORE_SAVED_STATES);
+        const index = store.index('timestamp');
+        // 降順 (prev) で取得
+        const request = index.getAll(null, 'prev'); 
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * 状態データを追加し、古いデータを削除して件数制限（limit）を守ります。
+ * @param {Object} stateData - 保存する状態データ { name, timestamp, state }
+ * @param {number} limit - 最大保存件数
+ * @returns {Promise<void>}
+ */
+export function addSavedState(stateData, limit = 5) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_STATES, 'readwrite');
+        const store = tx.objectStore(STORE_SAVED_STATES);
+        
+        // 1. まずデータを追加
+        store.put(stateData).onsuccess = () => {
+            // 2. 件数をチェック
+            store.count().onsuccess = (e) => {
+                const count = e.target.result;
+                if (count > limit) {
+                    // 3. 上限を超えていたら、古いもの（昇順カーソルの先頭）を削除
+                    const itemsToDelete = count - limit;
+                    let deletedCount = 0;
+                    // タイムスタンプのインデックスを昇順 (next) で開く
+                    const index = store.index('timestamp');
+                    const cursorRequest = index.openCursor(null, 'next');
+                    
+                    cursorRequest.onsuccess = (event) => {
+                        const cursor = event.target.result;
+                        if (cursor && deletedCount < itemsToDelete) {
+                            cursor.delete(); // 古い項目を削除
+                            deletedCount++;
+                            cursor.continue();
+                        }
+                    };
+                }
+            };
+        };
+        
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// --- ★ 新規: 保存済み駐車場 (Saved Parking) ---
+
+/**
+ * IDで単一の保存済み駐車場データを取得します。
+ * @param {number} id - 取得する駐車場データのID
+ * @returns {Promise<Object|undefined>} 駐車場データ
+ */
+export function getSavedParking(id) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_PARKING, 'readonly');
+        const store = tx.objectStore(STORE_SAVED_PARKING);
+        const request = store.get(id);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * すべての保存済み駐車場データをタイムスタンプ降順で取得します。
+ * @returns {Promise<Array>} 駐車場データの配列
+ */
+export function getAllSavedParking() {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_PARKING, 'readonly');
+        const store = tx.objectStore(STORE_SAVED_PARKING);
+        const index = store.index('timestamp');
+        // 降順 (prev) で取得
+        const request = index.getAll(null, 'prev');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * 駐車場データを追加し、古いデータを削除して件数制限（limit）を守ります。
+ * 名称が重複するデータがあれば、タイムスタンプを更新して上書きします。
+ * @param {Object} parkingData - 保存する駐車場データ { name, limit, memo, timestamp }
+ * @param {number} limit - 最大保存件数
+ * @returns {Promise<void>}
+ */
+export function addSavedParking(parkingData, limit = 20) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_PARKING, 'readwrite');
+        const store = tx.objectStore(STORE_SAVED_PARKING);
+        const nameIndex = store.index('name');
+
+        // 1. まず、同じ名前のデータが既にないか確認
+        nameIndex.get(parkingData.name).onsuccess = (e) => {
+            const existing = e.target.result;
+            if (existing) {
+                // 存在する場合、IDを引き継いでタイムスタンプを更新 (実質的な上書き)
+                parkingData.id = existing.id; 
+            }
+            
+            // 2. データを追加（または上書き）
+            store.put(parkingData).onsuccess = () => {
+                // 3. 件数をチェック
+                store.count().onsuccess = (e) => {
+                    const count = e.target.result;
+                    if (count > limit) {
+                        // 4. 上限を超えていたら、古いもの（昇順カーソルの先頭）を削除
+                        const itemsToDelete = count - limit;
+                        let deletedCount = 0;
+                        const tsIndex = store.index('timestamp');
+                        const cursorRequest = tsIndex.openCursor(null, 'next'); // 昇順
+                        
+                        cursorRequest.onsuccess = (event) => {
+                            const cursor = event.target.result;
+                            if (cursor && deletedCount < itemsToDelete) {
+                                cursor.delete(); // 古い項目を削除
+                                deletedCount++;
+                                cursor.continue();
+                            }
+                        };
+                    }
+                };
+            };
+        };
+        
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
     });
 }
 

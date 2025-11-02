@@ -76,21 +76,45 @@
             </a>
         </div>
 
-        <!-- ★ 修正: ファイル入出力ボタン -->
-        <section class="mb-6 grid grid-cols-2 gap-2 max-w-md">
-            <!-- 状態 -->
-            <button id="export-state-button" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200">
-                状態を保存 (JSON)
-            </button>
-            <label for="import-state-input" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200 cursor-pointer text-center">
-                状態を読み込む (JSON)
-            </label>
-            <input type="file" id="import-state-input" accept=".json">
+        <!-- ★ 修正: ファイル入出力・DB保存セクション -->
+        <section class="mb-6 p-4 bg-white rounded-lg shadow">
+            <h2 class="text-xl font-semibold text-gray-700 mb-3">データ操作</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                
+                <!-- ファイル操作 -->
+                <div class="space-y-2">
+                    <h3 class="font-medium text-gray-600">ファイルに保存</h3>
+                    <button id="export-state-button" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200">
+                        ファイルに保存
+                    </button>
+                    <label for="import-state-input" class="w-full text-center block bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200 cursor-pointer">
+                        ファイル読込み
+                    </label>
+                    <input type="file" id="import-state-input" accept=".json">
+                </div>
 
-            <!-- ★ 修正: マスターデータ管理ページへのリンク -->
-            <a href="./master.html" class="col-span-2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200 text-center">
-                マスターデータ管理
-            </a>
+                <!-- DB操作 -->
+                <div class="space-y-2">
+                    <h3 class="font-medium text-gray-600">ブラウザ内DB (過去5件)</h3>
+                    <button id="save-state-db-button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200">
+                        現在の状態をDBに保存
+                    </button>
+                    <div class="flex space-x-2">
+                        <select id="restore-state-select" class="flex-grow mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            <option value="">保存済みデータを選択...</option>
+                            <!-- JSで描画 -->
+                        </select>
+                        <button id="restore-state-button" class="mt-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-3 rounded-lg shadow transition duration-200">復元</button>
+                    </div>
+                </div>
+
+                <!-- マスター管理 -->
+                <div class="sm:col-span-2 mt-2">
+                     <a href="./master.html" class="w-full block bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-200 text-center">
+                        マスターデータ管理 (選手名簿・車リスト)
+                    </a>
+                </div>
+            </div>
         </section>
 
 
@@ -129,7 +153,7 @@
                 </div>
             </section>
 
-            <!-- ★ 新設: ステップ 4 駐車場情報 -->
+            <!-- ★ 修正: ステップ 4 駐車場情報 -->
             <section class="md:col-span-3">
                  <h2 class="text-xl font-semibold text-gray-700 mb-3">4. 駐車場と割り当て実行</h2>
                  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-lg shadow">
@@ -143,7 +167,17 @@
                         
                         <label for="parking-designated-memo" class="block text-sm font-medium text-gray-700 mt-3">備考 (例: 地図URL、注意事項)</label>
                         <textarea id="parking-designated-memo" rows="3" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="コミュニティプラザテニスコート脇③&#10;https://maps.app.goo.gl/..."></textarea>
+                        
+                        <!-- ★ 新規: 駐車場DB操作 -->
+                        <div class="mt-3 flex space-x-2">
+                            <select id="restore-parking-select" class="flex-grow mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                <option value="">保存済み駐車場から復元...</option>
+                                <!-- JSで描画 -->
+                            </select>
+                            <button id="save-parking-button" class="mt-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-3 rounded-lg shadow transition duration-200">保存</button>
+                        </div>
                     </div>
+                    
                     <!-- それ以外の駐車場 -->
                     <div>
                         <label for="parking-other-name" class="block text-sm font-medium text-gray-700">指定以外の駐車場の名称 (例: 丘の上)</label>
@@ -295,6 +329,13 @@
         const parkingDesignatedMemoEl = document.getElementById('parking-designated-memo');
         const parkingOtherNameEl = document.getElementById('parking-other-name');
         const parkingOtherMemoEl = document.getElementById('parking-other-memo');
+        
+        // ★ 新規: DB操作用DOM
+        const saveStateDbButton = document.getElementById('save-state-db-button');
+        const restoreStateSelect = document.getElementById('restore-state-select');
+        const restoreStateButton = document.getElementById('restore-state-button');
+        const saveParkingButton = document.getElementById('save-parking-button');
+        const restoreParkingSelect = document.getElementById('restore-parking-select');
 
 
         // --- ★ 修正: 初期化処理 ---
@@ -338,6 +379,10 @@
             renderCarList();
             renderExclusionList();
             
+            // ★ 新規: 保存済みデータをロードしてドロップダウンを更新
+            await loadSavedStates();
+            await loadSavedParking();
+            
             // イベントリスナー
             participantListEl.addEventListener('change', handleParticipantChange);
             participantListEl.addEventListener('input', handleParticipantDataInput); 
@@ -354,6 +399,13 @@
             showTextOutputButton.addEventListener('click', handleShowTextOutput);
             copyTextOutputButton.addEventListener('click', handleCopyTextOutput);
             toggleDetailsButton.addEventListener('click', handleToggleDetails);
+            
+            // ★ 新規: DB操作ボタンのイベントリスナー
+            saveStateDbButton.addEventListener('click', handleSaveStateToDB);
+            restoreStateButton.addEventListener('click', handleRestoreState);
+            saveParkingButton.addEventListener('click', handleSaveParking);
+            restoreParkingSelect.addEventListener('change', handleRestoreParking);
+
         });
         
         // ★ 修正: DBからマスターデータを読み込む関数
@@ -1159,7 +1211,7 @@
                  const oInfo = parkingInfo.other;
                  outputLines.push('\n-------');
                  outputLines.push(`□ ${oInfo.name}`);
-                 if (oInfo.memo) outputLines.push(`　${oInfo.memo.replace(/\n/g, '\n　')}`);
+                 if (oInfo.memo) outputLines.push(`　${oInfo.memo.replace(/\n/g, '\nM')}`);
                  otherCars.forEach(car => {
                      outputLines.push(`・${getCarTextLine(car)}`);
                  });
@@ -1203,6 +1255,132 @@
         }
         function legacyCopy(text){ 
               const textArea = document.createElement('textarea'); textArea.value = text; textArea.style.position = 'fixed'; textArea.style.opacity = '0'; document.body.appendChild(textArea); textArea.focus(); textArea.select(); try { const successful = document.execCommand('copy'); if (successful) { showMessage('クリップボードにコピーしました。', 'info'); } else { showMessage('コピーに失敗しました。', 'error'); } } catch (err) { showMessage('コピーに失敗しました。', 'error'); } document.body.removeChild(textArea);
+        }
+
+        // --- ★ 新規: DB保存・復元ロジック ---
+
+        async function loadSavedStates() {
+            try {
+                const states = await db.getAllSavedStates();
+                restoreStateSelect.innerHTML = '<option value="">保存済みデータを選択...</option>';
+                states.forEach(stateEntry => {
+                    const option = document.createElement('option');
+                    option.value = stateEntry.id;
+                    const date = new Date(stateEntry.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    option.textContent = `${stateEntry.name} (${date})`;
+                    restoreStateSelect.appendChild(option);
+                });
+            } catch (err) {
+                console.error("Failed to load saved states:", err);
+                showMessage("保存済み状態の読み込みに失敗しました。", "error");
+            }
+        }
+
+        async function loadSavedParking() {
+             try {
+                const parkingLots = await db.getAllSavedParking();
+                restoreParkingSelect.innerHTML = '<option value="">保存済み駐車場から復元...</option>';
+                parkingLots.forEach(parking => {
+                    const option = document.createElement('option');
+                    option.value = parking.id;
+                    option.textContent = `${parking.name} (制限:${parking.limit || 'なし'})`;
+                    // optionにデータを保持させておく（復元時に再クエリしないため）
+                    option.dataset.name = parking.name;
+                    option.dataset.limit = parking.limit;
+                    option.dataset.memo = parking.memo;
+                    restoreParkingSelect.appendChild(option);
+                });
+            } catch (err) {
+                console.error("Failed to load saved parking:", err);
+                showMessage("保存済み駐車場の読み込みに失敗しました。", "error");
+            }
+        }
+
+        async function handleSaveStateToDB() {
+            const defaultName = `無題の状態 (${new Date().toLocaleDateString('ja-JP')})`;
+            const name = prompt("この状態の保存名を入力してください:", defaultName);
+            if (name === null) return; // キャンセル
+
+            const state = getCurrentState();
+            const stateData = {
+                name: name || defaultName,
+                timestamp: Date.now(),
+                state: state
+            };
+
+            try {
+                await db.addSavedState(stateData, 5); // 5件に制限
+                await loadSavedStates(); // ドロップダウンを更新
+                showMessage(`状態「${stateData.name}」をDBに保存しました。`, 'info');
+            } catch (err) {
+                 showMessage(`状態のDB保存に失敗しました: ${err.message}`, 'error');
+            }
+        }
+
+        async function handleRestoreState() {
+            const stateId = parseInt(restoreStateSelect.value, 10);
+            if (!stateId) {
+                showMessage("復元する状態を選択してください。", "warning");
+                return;
+            }
+
+            try {
+                const stateEntry = await db.getSavedState(stateId);
+                if (stateEntry && stateEntry.state) {
+                    restoreState(stateEntry.state);
+                    // 画面全体を再描画
+                    renderParticipantList();
+                    renderCarList();
+                    renderExclusionList();
+                    showMessage(`状態「${stateEntry.name}」を復元しました。`, 'info');
+                } else {
+                    showMessage("選択された状態が見つかりませんでした。", "error");
+                }
+            } catch (err) {
+                 showMessage(`状態の復元に失敗しました: ${err.message}`, 'error');
+            }
+        }
+
+        async function handleSaveParking() {
+            const name = parkingDesignatedNameEl.value.trim();
+            const limit = parseInt(parkingDesignatedLimitEl.value, 10) || 0;
+            const memo = parkingDesignatedMemoEl.value.trim();
+
+            if (!name) {
+                showMessage("指定駐車場の名称を入力してください。", "warning");
+                return;
+            }
+            
+            const parkingData = {
+                name: name,
+                limit: limit,
+                memo: memo,
+                timestamp: Date.now()
+            };
+
+            try {
+                await db.addSavedParking(parkingData, 20); // 20件に制限
+                await loadSavedParking(); // ドロップダウンを更新
+                showMessage(`駐車場「${name}」をDBに保存しました。`, 'info');
+            } catch (err) {
+                 showMessage(`駐車場のDB保存に失敗しました: ${err.message}`, 'error');
+            }
+        }
+
+        function handleRestoreParking(e) {
+            const selectedOption = e.target.options[e.target.selectedIndex];
+            const parkingId = selectedOption.value;
+            if (!parkingId) return;
+
+            // optionのdatasetからデータを復元（DB再クエリ不要）
+            parkingDesignatedNameEl.value = selectedOption.dataset.name;
+            parkingDesignatedLimitEl.value = selectedOption.dataset.limit;
+            parkingDesignatedMemoEl.value = selectedOption.dataset.memo;
+            
+            showMessage(`駐車場「${selectedOption.dataset.name}」の情報を入力欄に復元しました。`, 'info');
+            
+            // 選択肢をリセット
+            e.target.value = "";
         }
         
     </script>
