@@ -478,17 +478,17 @@ export function addSavedParking(parkingData, limit = 20) {
         if (!db) return reject('DB not open');
         const tx = db.transaction(STORE_SAVED_PARKING, 'readwrite');
         const store = tx.objectStore(STORE_SAVED_PARKING);
-        const nameIndex = store.index('name');
+        // const nameIndex = store.index('name'); // ★ 削除 (同名でも別データとして保存)
 
         // 1. まず、同じ名前のデータが既にないか確認
-        nameIndex.get(parkingData.name).onsuccess = (e) => {
-            const existing = e.target.result;
-            if (existing) {
+        // nameIndex.get(parkingData.name).onsuccess = (e) => { // ★ 削除
+            // const existing = e.target.result; // ★ 削除
+            // if (existing) { // ★ 削除
                 // 存在する場合、IDを引き継いでタイムスタンプを更新 (実質的な上書き)
-                parkingData.id = existing.id; 
-            }
+                // parkingData.id = existing.id;  // ★ 削除
+            // } // ★ 削除
             
-            // 2. データを追加（または上書き）
+            // 2. データを追加
             store.put(parkingData).onsuccess = () => {
                 // 3. 件数をチェック
                 store.count().onsuccess = (e) => {
@@ -511,8 +511,76 @@ export function addSavedParking(parkingData, limit = 20) {
                     }
                 };
             };
-        };
+        // }; // ★ 削除
         
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// --- ★ 新規: 削除と全クリア ---
+
+/**
+ * IDで指定された保存済み状態を削除します。
+ * @param {number} id - 削除する状態のID
+ * @returns {Promise<void>}
+ */
+export function deleteSavedState(id) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_STATES, 'readwrite');
+        const store = tx.objectStore(STORE_SAVED_STATES);
+        const request = store.delete(id);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * IDで指定された保存済み駐車場を削除します。
+ * @param {number} id - 削除する駐車場のID
+ * @returns {Promise<void>}
+ */
+export function deleteSavedParking(id) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_PARKING, 'readwrite');
+        const store = tx.objectStore(STORE_SAVED_PARKING);
+        const request = store.delete(id);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
+/**
+ * データベースのすべてのストアをクリアします（全データ初期化）。
+ * @returns {Promise<void>}
+ */
+export function clearAllData() {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        // すべてのストア名を指定
+        const storeNames = [STORE_FAMILIES, STORE_CARS, STORE_SAVED_STATES, STORE_SAVED_PARKING];
+        const tx = db.transaction(storeNames, 'readwrite');
+        
+        let clearCount = 0;
+        const totalStores = storeNames.length;
+
+        storeNames.forEach(storeName => {
+            const store = tx.objectStore(storeName);
+            const request = store.clear();
+            request.onsuccess = () => {
+                clearCount++;
+                if (clearCount === totalStores) {
+                    // すべてのクリアが成功
+                }
+            };
+            request.onerror = (e) => {
+                tx.abort();
+                reject(e.target.error);
+            };
+        });
+
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
     });
