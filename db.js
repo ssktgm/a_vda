@@ -1,10 +1,9 @@
 // db.js: IndexedDBヘルパーモジュール
 
 const DB_NAME = 'CarDispatchDB';
-const DB_VERSION = 2; // ★ バージョンを2に更新
+const DB_VERSION = 2; // バージョンは2のまま
 const STORE_FAMILIES = 'families';
 const STORE_CARS = 'cars';
-// ★ 新規: ストア名
 const STORE_SAVED_STATES = 'savedStates';
 const STORE_SAVED_PARKING = 'savedParking';
 
@@ -368,10 +367,17 @@ export function getAllSavedStates() {
         if (!db) return reject('DB not open');
         const tx = db.transaction(STORE_SAVED_STATES, 'readonly');
         const store = tx.objectStore(STORE_SAVED_STATES);
-        const index = store.index('timestamp');
+        // const index = store.index('timestamp');
         // 降順 (prev) で取得
-        const request = index.getAll(null, 'prev'); 
-        request.onsuccess = () => resolve(request.result);
+        // const request = index.getAll(null, 'prev'); // ★ 誤り
+        const request = store.getAll(); // ★ 修正: まず全件取得
+
+        request.onsuccess = () => {
+            // ★ 修正: 取得後にJSでソート
+            const result = request.result || [];
+            result.sort((a, b) => b.timestamp - a.timestamp); // 降順ソート
+            resolve(result);
+        };
         request.onerror = () => reject(request.error);
     });
 }
@@ -445,10 +451,17 @@ export function getAllSavedParking() {
         if (!db) return reject('DB not open');
         const tx = db.transaction(STORE_SAVED_PARKING, 'readonly');
         const store = tx.objectStore(STORE_SAVED_PARKING);
-        const index = store.index('timestamp');
+        // const index = store.index('timestamp');
         // 降順 (prev) で取得
-        const request = index.getAll(null, 'prev');
-        request.onsuccess = () => resolve(request.result);
+        // const request = index.getAll(null, 'prev'); // ★ 誤り
+        const request = store.getAll(); // ★ 修正: まず全件取得
+        
+        request.onsuccess = () => {
+            // ★ 修正: 取得後にJSでソート
+            const result = request.result || [];
+            result.sort((a, b) => b.timestamp - a.timestamp); // 降順ソート
+            resolve(result);
+        };
         request.onerror = () => reject(request.error);
     });
 }
