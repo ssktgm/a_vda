@@ -165,7 +165,11 @@
                  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-lg shadow">
                     <!-- 指定駐車場 -->
                     <div>
-                        <label for="parking-designated-name" class="block text-sm font-medium text-gray-700">指定駐車場の名称 (例: SF-A面)</label>
+                        <!-- ★ 新規: グラウンド名 -->
+                        <label for="ground-name" class="block text-sm font-medium text-gray-700">グラウンド名 (必須)</label>
+                        <input type="text" id="ground-name" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="例: SF (高柳) / 逆井G / 塚崎G">
+
+                        <label for="parking-designated-name" class="block text-sm font-medium text-gray-700 mt-3">指定駐車場の名称 (例: SF-A面)</label>
                         <input type="text" id="parking-designated-name" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="SF-A面">
                         
                         <label for="parking-designated-limit" class="block text-sm font-medium text-gray-700 mt-3">台数制限 (半角数字)</label>
@@ -278,7 +282,7 @@
             { familyName: '古川家', members: [ { id: 'p40', name: '峻丞', type: '選手', isFlagTarget: true, data: { grade: '2年', school: '新松戸南小', other: '', memo: '' } }, { id: 'p41', name: '古川父', type: '保護者', data: { memo: '' } } ] },
             { familyName: '坪井家', members: [ { id: 'p42', name: '雄也', type: '選手', isFlagTarget: true, data: { grade: '1年', school: '東小', other: '', memo: '' } }, { id: 'p43', name: '坪井父', type: '保護者', data: { memo: '' } } ] },
              { familyName: '鈴木家', members: [
-                    { id: 'p48', name: '智大', type: '選手', isFlagTarget: true, data: { grade: '1年', school: '根木内小', other: '', memo: '' } },
+                    { id: 'p48', name: 'チヒロ', type: '選手', isFlagTarget: true, data: { grade: 'x年', school: 'y小', other: '', memo: '' } },
                     { id: 'p49', name: '鈴木父', type: '保護者', data: { memo: ''}},
                     { id: 'p50', name: '鈴木母', type: '保護者', data: { memo: ''}}
             ]},
@@ -291,7 +295,7 @@
         ];
 
         const DEFAULT_AVAILABLE_CARS_INFO = [
-            { id: 'c1', name: '小高カー', familyName: '小高家', baseCapacity: 6 }, { id: 'c2', name: '難波カー', familyName: '難波家', baseCapacity: 7 }, { id: 'c3', name: '浪川カー①', familyName: '浪川家', baseCapacity: 6 }, { id: 'c4', name: '浪川カー②', familyName: '浪川家', baseCapacity: 5 }, { id: 'c5', name: '山田カー①', familyName: '山田家', baseCapacity: 7 }, { id: 'c6', name: '山田カー②', familyName: '山田家', baseCapacity: 5 }, { id: 'c7', name: '菱沼カー', familyName: '菱沼家', baseCapacity: 6 }, { id: 'c8', name: '小野カー', familyName: '小野家', baseCapacity: 8 }, { id: 'c9', name: '浅野カー', familyName: '浅野家', baseCapacity: 8 }, { id: 'c10', name: '近藤カー', familyName: '近藤家', baseCapacity: 6 }, { id: 'c11', name: '知野見カー', familyName: '知野見家', baseCapacity: 7 }, { id: 'c12', name: '藤山カー', familyName: '藤山家', baseCapacity: 4 }, { id: 'c13', name: '小河原カー①', familyName: '小河原家', baseCapacity: 4 }, { id: 'c14', name: '小河原カー②', familyName: '小河原家', baseCapacity: 4 }, { id: 'c15', name: '古川カー', familyName: '古川家', baseCapacity: 8 }, { id: 'c16', name: 'コーチカー', familyName: 'スタッフ・個人', baseCapacity: 5 }
+            { id: 'c15', name: '古川カー', familyName: '古川家', baseCapacity: 8 }, { id: 'c16', name: 'コーチカー', familyName: 'スタッフ・個人', baseCapacity: 5 }
         ];
 
 
@@ -332,6 +336,9 @@
         const copyTextOutputButton = document.getElementById('copy-text-output-button');
         const toggleDetailsButton = document.getElementById('toggle-details-button');
         
+        // ★ 新規: グラウンド名
+        const groundNameEl = document.getElementById('ground-name');
+
         const parkingDesignatedNameEl = document.getElementById('parking-designated-name');
         const parkingDesignatedLimitEl = document.getElementById('parking-designated-limit');
         const parkingDesignatedMemoEl = document.getElementById('parking-designated-memo');
@@ -1173,6 +1180,8 @@
              if (participantData.size === 0) { initializeParticipantData(); }
              
              parkingInfo = state.parkingInfo || { designated: { name: '', limit: 0, memo: '' }, other: { name: '', memo: '' } };
+             // ★ 修正: 駐車場復元時にグラウンド名も復元 (v2以前のデータでは parkingInfo.groundName は無いため、falsy check)
+             groundNameEl.value = state.parkingInfo?.groundName || ''; 
              parkingDesignatedNameEl.value = parkingInfo.designated.name;
              parkingDesignatedLimitEl.value = parkingInfo.designated.limit;
              parkingDesignatedMemoEl.value = parkingInfo.designated.memo;
@@ -1214,6 +1223,12 @@
              
              let outputLines = ["# 出力結果\n"];
              
+             // ★ 新規: グラウンド名を出力に追加
+             const groundName = groundNameEl.value.trim();
+             if (groundName) {
+                 outputLines.push(`グラウンド: ${groundName}\n`);
+             }
+
              const designatedCars = currentAssignments.filter(c => c.assignedParking === 'designated');
              const dInfo = parkingInfo.designated;
              outputLines.push(`□ ${dInfo.name} (${dInfo.limit > 0 ? dInfo.limit + '台' : '台数制限なし'})`);
@@ -1299,13 +1314,12 @@
                 parkingLots.forEach(parking => {
                     const option = document.createElement('option');
                     option.value = parking.id;
-                    // ★ 修正: 名称 + 日付で表示
+                    // ★ 修正: グラウンド名と指定駐車場名で表示
                     const date = new Date(parking.timestamp).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
-                    option.textContent = `${parking.name} (${date})`;
+                    option.textContent = `${parking.groundName} (${parking.parkingInfo.name || '指定なし'}) - ${date}`;
                     // optionにデータを保持させておく（復元時に再クエリしないため）
-                    option.dataset.name = parking.name;
-                    option.dataset.limit = parking.limit;
-                    option.dataset.memo = parking.memo;
+                    option.dataset.groundName = parking.groundName;
+                    option.dataset.parkingInfo = JSON.stringify(parking.parkingInfo);
                     restoreParkingSelect.appendChild(option);
                 });
             } catch (err) {
@@ -1319,11 +1333,14 @@
             const name = prompt("この状態の保存名を入力してください:", defaultName);
             if (name === null) return; // キャンセル
 
-            const state = getCurrentState();
+            // ★ 修正: parkingInfo にグラウンド名も格納する
+            const currentState = getCurrentState();
+            currentState.parkingInfo.groundName = groundNameEl.value.trim();
+
             const stateData = {
                 name: name || defaultName,
                 timestamp: Date.now(),
-                state: state
+                state: currentState // グラウンド名が含まれた状態
             };
 
             try {
@@ -1360,33 +1377,33 @@
         }
 
         async function handleSaveParking() {
-            const nameInput = parkingDesignatedNameEl.value.trim();
+            // ★ 修正: グラウンド名をキーとして保存
+            const groundName = groundNameEl.value.trim();
             const limit = parseInt(parkingDesignatedLimitEl.value, 10) || 0;
             const memo = parkingDesignatedMemoEl.value.trim();
+            const designatedName = parkingDesignatedNameEl.value.trim();
 
-            if (!nameInput) {
-                showMessage("指定駐車場の名称を入力してください。", "warning");
+            if (!groundName) {
+                showMessage("グラウンド名（必須）を入力してください。", "warning");
                 return;
             }
             
-            // ★ 新規: 名称をプロンプトで聞く
-            const defaultName = `${nameInput} (${new Date().toLocaleDateString('ja-JP')})`;
-            const name = prompt("この駐車場の保存名を入力してください:", defaultName);
-            if (name === null) return; // キャンセル
+            // ★ 修正: プロンプトは不要（同名グラウンドでも別ルールとして保存）
             
             const parkingData = {
-                name: name || defaultName, // ★ 保存名
-                limit: limit, // ★ 台数
-                memo: memo, // ★ 備考
-                timestamp: Date.now(),
-                 // ★ 復元用に、入力されていた名称自体も保存しておく
-                originalName: nameInput 
+                groundName: groundName,
+                parkingInfo: {
+                    name: designatedName,
+                    limit: limit,
+                    memo: memo
+                },
+                timestamp: Date.now()
             };
 
             try {
                 await db.addSavedParking(parkingData, 20); // 20件に制限
                 await loadSavedParking(); // ドロップダウンを更新
-                showMessage(`駐車場「${name}」をDBに保存しました。`, 'info');
+                showMessage(`駐車場ルール「${groundName} (${designatedName || '指定なし'})」をDBに保存しました。`, 'info');
             } catch (err) {
                  showMessage(`駐車場のDB保存に失敗しました: ${err.message}`, 'error');
             }
@@ -1398,10 +1415,12 @@
             if (!parkingId) return;
 
             // optionのdatasetからデータを復元（DB再クエリ不要）
-            // ★ 修正: originalName を復元（もしあれば）。なければnameを復元
-            parkingDesignatedNameEl.value = selectedOption.dataset.originalName || selectedOption.dataset.name;
-            parkingDesignatedLimitEl.value = selectedOption.dataset.limit;
-            parkingDesignatedMemoEl.value = selectedOption.dataset.memo;
+            const parkingInfo = JSON.parse(selectedOption.dataset.parkingInfo);
+
+            groundNameEl.value = selectedOption.dataset.groundName;
+            parkingDesignatedNameEl.value = parkingInfo.name;
+            parkingDesignatedLimitEl.value = parkingInfo.limit;
+            parkingDesignatedMemoEl.value = parkingInfo.memo;
             
             showMessage(`駐車場「${selectedOption.textContent}」の情報を入力欄に復元しました。`, 'info');
             
@@ -1482,5 +1501,6 @@
 
 </body>
 </html>
+
 
 
