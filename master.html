@@ -95,8 +95,8 @@
             </div>
             <div class="mt-4 p-4 bg-white rounded-lg shadow">
                 <h3 class="text-lg font-medium mb-2">新しい車を追加</h3>
-                <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                    <input type="text" id="new-car-id" placeholder="ID (例: c99)" class="p-2 border rounded-md shadow-sm">
+                <!-- ★ 修正: ID入力欄を削除 -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <input type="text" id="new-car-name" placeholder="車の名前 (例: 鈴木カー)" class="p-2 border rounded-md shadow-sm">
                     <input type="text" id="new-car-family" placeholder="関連家族名 (任意)" class="p-2 border rounded-md shadow-sm">
                     <input type="number" id="new-car-capacity" placeholder="定員 (例: 5)" class="p-2 border rounded-md shadow-sm">
@@ -128,8 +128,8 @@
 
         // --- 初期化 ---
         document.addEventListener('DOMContentLoaded', async () => {
-            try {
-                // DBを開く (デフォルトデータはindex.html側で投入される前提)
+                // ★ 修正: DBを開き、初回であればデフォルトデータを投入
+                // (order付与はdb.jsのonupgradeneededが担当)
                 await db.openDB([], []); // デフォルトデータは渡さない
                 
                 // ★ 新規: 既存データにorderがない場合のマイグレーション
@@ -246,7 +246,7 @@
                         <span>ID (自動)</span>
                         <span>名前</span>
                         <span>タイプ</span>
-                        <span>当番対象</span>
+                        <span>同乗優先</span> <!-- ★ 名称変更 -->
                         <span class="col-span-2">データ (JSON)</span>
                     </div>
                     ${family.members.map(m => renderMember(m, family.familyName)).join('')}
@@ -292,7 +292,7 @@
             
             carCard.innerHTML = `
                 <div>
-                    <label class="block text-xs font-medium text-gray-500">ID (変更不可)</label>
+                    <label class="block text-xs font-medium text-gray-500">ID (自動)</label> <!-- ★ ラベル変更 -->
                     <input type="text" value="${car.id}" data-type="id" class="p-1 border rounded text-sm w-full bg-gray-100" readonly>
                 </div>
                 <div>
@@ -553,18 +553,19 @@
         // --- イベントハンドラ (車) ---
         
         async function handleAddCar() {
-            const idInput = document.getElementById('new-car-id');
+            // ★ 修正: idInput を削除
             const nameInput = document.getElementById('new-car-name');
             const familyInput = document.getElementById('new-car-family');
             const capacityInput = document.getElementById('new-car-capacity');
             
-            const id = idInput.value.trim();
+            // ★ 修正: id を自動生成
+            const id = `c${Date.now()}`; 
             const name = nameInput.value.trim();
             const familyName = familyInput.value.trim(); // 任意
             const baseCapacity = parseInt(capacityInput.value, 10);
 
-            if (!id || !name || !baseCapacity) {
-                showMessage('ID、車の名前、定員は必須です。', 'error');
+            if (!name || !baseCapacity) { // ★ 修正: idのチェックを削除
+                showMessage('車の名前、定員は必須です。', 'error');
                 return;
             }
             
@@ -580,7 +581,6 @@
                  renderCar(newCar);
                  
                  // 入力欄をクリア
-                 idInput.value = '';
                  nameInput.value = '';
                  familyInput.value = '';
                  capacityInput.value = '';
@@ -645,15 +645,17 @@
         
         async function handleExportMasterData() {
             try {
-                const [families, cars] = await Promise.all([
+                // ★ 修正: 駐車場データも取得
+                const [families, cars, parking] = await Promise.all([
                     db.getAllFamilies(),
-                    db.getAllCars()
+                    db.getAllCars(),
+                    db.getAllSavedParking() // ★ 新規
                 ]);
                 
                 // ★ 念のためエクスポート時もソート
                 families.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
                 
-                const masterData = { families, cars };
+                const masterData = { families, cars, parking }; // ★ parking を追加
                 const jsonString = JSON.stringify(masterData, null, 2); 
                 
                 const blob = new Blob([jsonString], { type: 'application/json' });
@@ -676,18 +678,16 @@
              const file = e.target.files[0];
              if (!file) return;
              
-             if (!confirm('本当にマスターデータを読み込みますか？\n現在保存されているデータはすべて上書きされます。')) {
-                 e.target.value = null; // ファイル選択をキャンセル
-                 return;
-             }
-             
-             const reader = new FileReader();
              reader.onload = async (event) => {
                  try {
                      const masterData = JSON.parse(event.target.result);
-                     if (!masterData || !Array.isArray(masterData.families) || !Array.isArray(masterData.cars)) {
-                         throw new Error('JSONの形式が正しくありません。 "families" と "cars" の配列が必要です。');
-                     }
+-                    if (!masterData || !Array.isArray(masterData.families) || !Array.isArray(masterData.cars)) {
+-                        throw new Error('JSONの形式が正しくありません。 "families" と "cars" の配列が必要です。');
+-                    }
++                    // ★ 修正: parking は任意
++                    if (!masterData || !Array.isArray(masterData.families) || !Array.isArray(masterData.cars)) {
++                        throw new Error('JSONの形式が正しくありません。 "families" と "cars" の配列が必須です。');
++                    }
                      
                      // ★ 新規: インポートデータにorderを付与 (ない場合)
                      let maxOrder = -1;
@@ -703,10 +703,14 @@
                      // DBをクリア
                      await db.clearFamilies();
                      await db.clearCars();
++                    await db.clearParking(); // ★ 新規: 駐車場もクリア
                      
                      // 新しいデータを一括投入
                      await db.bulkAddFamilies(masterData.families);
                      await db.bulkAddCars(masterData.cars);
++                    if (masterData.parking && Array.isArray(masterData.parking)) { // ★ 新規: 駐車場データも投入
++                        await db.bulkAddParking(masterData.parking);
++                    }
                      
                      // 画面を再読み込み
                      await loadAllData();
@@ -758,4 +762,5 @@
     </script>
 </body>
 </html>
+
 
