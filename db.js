@@ -1,7 +1,7 @@
 // db.js: IndexedDBヘルパーモジュール
 
 const DB_NAME = 'CarDispatchDB';
-const DB_VERSION = 2; // バージョンは2のまま
+const DB_VERSION = 3; // ★ バージョンを3に更新
 const STORE_FAMILIES = 'families';
 const STORE_CARS = 'cars';
 const STORE_SAVED_STATES = 'savedStates';
@@ -89,6 +89,20 @@ export function openDB(defaultFamilies = [], defaultCars = []) {
               // ★ 名称でも検索・重複削除できるようにインデックス作成
               parkingStore.createIndex('name', 'name', { unique: false }); 
           }
+      }
+      
+      // --- ★ v3 (駐車場ストアの構造変更) ---
+      if (oldVersion < 3) {
+          // 既存の savedParking ストアを削除
+          if (tempDb.objectStoreNames.contains(STORE_SAVED_PARKING)) {
+              tempDb.deleteObjectStore(STORE_SAVED_PARKING);
+          }
+          // 新しい構造で savedParking ストアを作成
+          const parkingStore = tempDb.createObjectStore(STORE_SAVED_PARKING, { keyPath: 'id', autoIncrement: true });
+          // グラウンド名で検索できるようにインデックス作成
+          parkingStore.createIndex('groundName', 'groundName', { unique: false });
+          // タイムスタンプでソートできるようにインデックス作成
+          parkingStore.createIndex('timestamp', 'timestamp', { unique: false });
       }
       
     };
@@ -424,7 +438,7 @@ export function addSavedState(stateData, limit = 5) {
     });
 }
 
-// --- ★ 新規: 保存済み駐車場 (Saved Parking) ---
+// --- ★ 修正: 保存済み駐車場 (Saved Parking) ---
 
 /**
  * IDで単一の保存済み駐車場データを取得します。
@@ -468,8 +482,8 @@ export function getAllSavedParking() {
 
 /**
  * 駐車場データを追加し、古いデータを削除して件数制限（limit）を守ります。
- * 名称が重複するデータがあれば、タイムスタンプを更新して上書きします。
- * @param {Object} parkingData - 保存する駐車場データ { name, limit, memo, timestamp }
+ * ★ v3: 同名（グラウンド名）でも別データとして保存します。
+ * @param {Object} parkingData - 保存する駐車場データ { groundName, parkingInfo: {...}, timestamp }
  * @param {number} limit - 最大保存件数
  * @returns {Promise<void>}
  */
@@ -478,45 +492,79 @@ export function addSavedParking(parkingData, limit = 20) {
         if (!db) return reject('DB not open');
         const tx = db.transaction(STORE_SAVED_PARKING, 'readwrite');
         const store = tx.objectStore(STORE_SAVED_PARKING);
-        // const nameIndex = store.index('name'); // ★ 削除 (同名でも別データとして保存)
-
-        // 1. まず、同じ名前のデータが既にないか確認
-        // nameIndex.get(parkingData.name).onsuccess = (e) => { // ★ 削除
-            // const existing = e.target.result; // ★ 削除
-            // if (existing) { // ★ 削除
-                // 存在する場合、IDを引き継いでタイムスタンプを更新 (実質的な上書き)
-                // parkingData.id = existing.id;  // ★ 削除
-            // } // ★ 削除
-            
-            // 2. データを追加
-            store.put(parkingData).onsuccess = () => {
-                // 3. 件数をチェック
-                store.count().onsuccess = (e) => {
-                    const count = e.target.result;
-                    if (count > limit) {
-                        // 4. 上限を超えていたら、古いもの（昇順カーソルの先頭）を削除
-                        const itemsToDelete = count - limit;
-                        let deletedCount = 0;
-                        const tsIndex = store.index('timestamp');
-                        const cursorRequest = tsIndex.openCursor(null, 'next'); // 昇順
-                        
-                        cursorRequest.onsuccess = (event) => {
-                            const cursor = event.target.result;
-                            if (cursor && deletedCount < itemsToDelete) {
-                                cursor.delete(); // 古い項目を削除
-                                deletedCount++;
-                                cursor.continue();
-                            }
-                        };
-                    }
-                };
+        
+        // ★ v3: 重複チェックロジックは不要 (同名グラウンドも保存許可)
+        
+        // 1. データを追加
+        store.put(parkingData).onsuccess = () => {
+            // 2. 件数をチェック
+            store.count().onsuccess = (e) => {
+                const count = e.target.result;
+                if (count > limit) {
+                    // 3. 上限を超えていたら、古いもの（昇順カーソルの先頭）を削除
+                    const itemsToDelete = count - limit;
+                    let deletedCount = 0;
+                    const tsIndex = store.index('timestamp');
+                    const cursorRequest = tsIndex.openCursor(null, 'next'); // 昇順
+                    
+                    cursorRequest.onsuccess = (event) => {
+                        const cursor = event.target.result;
+                        if (cursor && deletedCount < itemsToDelete) {
+                            cursor.delete(); // 古い項目を削除
+                            deletedCount++;
+                            cursor.continue();
+                        }
+                    };
+                }
             };
-        // }; // ★ 削除
+        };
         
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
     });
 }
+
+/**
+ * ★ 新規: 複数の駐車場データを一括で追加または更新します。(インポート用)
+ * @param {Array} parkingList - 保存する駐車場データの配列
+ * @returns {Promise<void>}
+ */
+export function bulkAddParking(parkingList) {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_PARKING, 'readwrite');
+        const store = tx.objectStore(STORE_SAVED_PARKING);
+        let count = 0;
+
+        if (parkingList.length === 0) {
+            return resolve();
+        }
+        
+        parkingList.forEach(parking => {
+            // インポートデータにidがあっても上書き（autoIncrement）させるため削除
+            delete parking.id; 
+            const request = store.put(parking);
+            request.onsuccess = () => {
+                count++;
+                if (count === parkingList.length) {
+                    // トランザクション自体の完了を待つ
+                }
+            };
+             request.onerror = (e) => {
+                tx.abort();
+                console.error('bulkAddParking error during put:', e.target.error);
+                reject(e.target.error);
+             }
+        });
+
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => {
+            console.error('bulkAddParking transaction error:', tx.error);
+            reject(tx.error);
+        }
+    });
+}
+
 
 // --- ★ 新規: 削除と全クリア ---
 
@@ -551,6 +599,22 @@ export function deleteSavedParking(id) {
         request.onerror = () => reject(request.error);
     });
 }
+
+/**
+ * ★ 新規: すべての駐車場データを削除します。(インポート用)
+ * @returns {Promise<void>}
+ */
+export function clearParking() {
+    return new Promise((resolve, reject) => {
+        if (!db) return reject('DB not open');
+        const tx = db.transaction(STORE_SAVED_PARKING, 'readwrite');
+        const store = tx.objectStore(STORE_SAVED_PARKING);
+        const request = store.clear();
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
 
 /**
  * データベースのすべてのストアをクリアします（全データ初期化）。
